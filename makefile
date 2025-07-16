@@ -3,7 +3,6 @@ KERNEL_SRC ?= /home/eungga/linux-6.15.6
 
 #BPF_CLANG   ?= clang
 #BPF_CLANG   ?= /home/eungga/llvm/llvm18.1.7/llvm-project/llvm/build/bin/clang
-BPFTOOL := /usr/local/sbin/bpftool
 BPF_CLANG   ?= clang-18
 BPF_LLC     ?= llc
 BPF_CFLAGS  := -O2 -target bpf -g
@@ -23,23 +22,22 @@ LIBBPF_LDFLAGS := -L$(LIBBPF_DIR)/src -lbpf
 
 BPF_SRCS := arena_xdp_kern.c arena_syscall_kern.c
 BPF_OBJS := $(BPF_SRCS:.c=.o)
-BPF_SKELS   := $(BPF_OBJS:.o=.skel.h)
 
-all: $(BPF_OBJS) $(BPF_SKELS) loader
+all: loader $(BPF_OBJS)
 
-# Step 1: BPF 컴파일 → .bpf.o
-%.o: %.c
-	$(BPF_CLANG) $(BPF_CFLAGS) $(INCLUDES) -c $< -o $@
+# BPF IR 생성 (.ll)
+%.ll: %.c
+	$(BPF_CLANG) $(BPF_CFLAGS) $(LIBBPF_CFLAGS) -S -emit-llvm $< -o $@
 
-# Step 2: 스켈레톤 생성 → .skel.h
-%.skel.h: %.o
-	/usr/local/sbin/bpftool gen skeleton $< > $@
+# BPF ELF .o 생성
+%.o: %.ll
+	$(BPF_LLC) -march=bpf -filetype=obj -o $@ $<
 
-# 로더 빌드 (스켈레톤 포함)
-loader: loader.c $(BPF_SKELS)
-	gcc -O2 loader.c -o $@ $(LIBBPF_LDFLAGS)
+# loader 바이너리 생성 (BPF .o는 링크하지 않음)
+loader: loader.c
+	gcc loader.c -o $@ $(LIBBPF_LDFLAGS)
 
 clean:
-	rm -f *.o *.skel.h loader
+	rm -f *.ll *.o loader
 
 .PHONY: all clean
